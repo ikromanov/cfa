@@ -1,0 +1,8 @@
+{
+  "name": "cfa-study",
+  "version": "1.0.0",
+  "description": "CFA Level II study tools: question generation, topic drills, and exam practice",
+  "author": {
+    "name": "Ivan Romanov"
+  }
+}

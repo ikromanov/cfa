@@ -1,0 +1,14 @@
+# Fly.io app config for the CFA Telegram bot.
+# Rename `app` below if this name is already taken.
+app = "cfa-telegram-bot"
+primary_region = "iad"
+
+[build]
+
+[mounts]
+  source = "cfa_bot_data"
+  destination = "/app/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
