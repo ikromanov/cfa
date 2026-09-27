@@ -1,9 +1,27 @@
-# CFA Level II — Study Plan: April 2026 → November 2026
+# CFA Level II — Study Plan (Revised): September 2026 → November 2026
 
-**Exam date:** ~November 7, 2026  
-**Today:** March 31, 2026  
-**Total weeks:** 31  
-**Target hours:** ~370 (≥ 300 recommended by CFA Institute)
+**Exam date:** Wednesday, November 18, 2026  
+**Revised:** September 27, 2026  
+**Remaining:** 7 weeks + 2 days  
+**Target hours:** ~140 (≈20h/wk)
+
+---
+
+## Where Things Stand
+
+The original plan (March 31) assumed ~280h and five mocks done by now. Actual
+progress: one scan of all materials plus some practice questions — roughly the
+end of the old Phase 1, with no mocks taken. This revision compresses the rest
+into two phases:
+
+1. **Questions-first learning.** You've already skimmed everything, so skip a
+   second reading pass. For each topic spend ~20% on summary/formulas, ~60% on
+   vignettes, ~20% reviewing mistakes (in the app, using the sliders).
+2. **Allocate by exam weight, not full coverage.** The five high-weight topics
+   are ~60% of the exam and get most of the hours.
+
+At ~140h this is below the 300h CFA Institute recommends — the target is the
+minimum passing score, not mastery. Cut accordingly.
 
 ---
 
@@ -24,97 +42,43 @@
 
 ---
 
-## Phase 1 — Foundation (Apr 1 – May 24 · 8 weeks · 10h/wk · 80h)
+---
 
-**Goal:** One complete pass through all topics. Read + use the app charts to build
-intuition. Do NOT drill practice questions yet — focus on understanding.
+## Phase A — Fast Learning Pass by Weight (Sep 28 – Oct 25 · 4 weeks · ~80h)
 
-| Week | Dates | Topic | App Module | Hours |
-|---|---|---|---|---|
-| 1 | Apr 1–6 | Ethics & Professional Standards | `ethics.py` | 10 |
-| 2 | Apr 7–13 | Quantitative Methods — regression | `quant.py` | 10 |
-| 3 | Apr 14–20 | Quantitative Methods — time series, ML | `quant.py` | 10 |
-| 4 | Apr 21–27 | Economics — FX, PPP, IRP | `economics.py` | 10 |
-| 5 | Apr 28 – May 4 | Economics — BOP, Solow growth | `economics.py` | 10 |
-| 6 | May 5–11 | FSA — intercorporate investments | `fsa.py` | 10 |
-| 7 | May 12–18 | FSA — pensions, multinational FX | `fsa.py` | 10 |
-| 8 | May 19–24 | Corporate Issuers — MM, dividends, ESG | `corporate.py` | 10 |
+**Day 1 (Mon Sep 28): half-mock baseline.** One 44-question session, timed
+(2h12m). Its only job is to set the topic order within each week below.
 
-### Phase 1 Milestone: Diagnostic Mock #1 (May 24)
+| Week | Dates | Topics (hours) | App Modules |
+|---|---|---|---|
+| 1 | Sep 28 – Oct 4 | Ethics — Standards I–VII + cases (8h) · FSA — intercorporate investments, pensions, multinational FX (12h) | `ethics.py`, `fsa.py` |
+| 2 | Oct 5–11 | Equity — FCFF/FCFE, residual income, multiples, private company (12h) · Fixed Income — term structure, arbitrage-free valuation (8h) | `equity.py`, `fixed_income.py` |
+| 3 | Oct 12–18 | Fixed Income — embedded options, credit, CDS (6h) · Portfolio Mgmt (8h) · Derivatives — forwards/futures, swaps, options (6h) | `fixed_income.py`, `portfolio.py`, `derivatives.py` |
+| 4 | Oct 19–24 | Quant — regression, time series (6h) · Economics — FX, IRP/PPP, growth (4h) · Corporate Issuers (4h) · Alternatives — real estate/REITs, PE, hedge funds (5h) | `quant.py`, `economics.py`, `corporate.py`, `alternatives.py` |
+| — | **Sun Oct 25** | **Mock A** — full, timed (AM + PM) | |
 
-Take a full mock exam (AM + PM, 2 × 44 vignette questions).  
-Score is a **baseline only** — 40–50% is normal at this stage.  
-Use results to identify structural weak areas before Phase 2.
+**Daily habit (15 min, every day including weekends):** a few `/ask` questions
+from the Telegram bot, or `/cfa-questions n=2`, on topics *already covered*.
+This adds the spaced repetition the compressed pass would otherwise lack.
+
+**If you fall behind:** don't push the whole schedule back. Cut the
+lowest-weight material first (parts of Economics, the thinner Corporate
+Issuers readings, ML in Quant). Never cut Ethics.
 
 ---
 
-## Phase 2 — Depth (May 25 – Aug 2 · 10 weeks · 12h/wk · 120h)
-
-**Goal:** Level II concepts at vignette depth. After each study session, work
-2–3 CFA Institute practice vignettes on that topic. Build the habit of reading
-the full vignette before answering.
-
-| Week | Dates | Topic | App Module | Hours |
-|---|---|---|---|---|
-| 9 | May 25–31 | Equity — DDM/DCF review + Residual Income | `equity.py` | 12 |
-| 10 | Jun 1–7 | Equity — Private company valuation, industry analysis | `equity.py` | 12 |
-| 11 | Jun 8–14 | Fixed Income — bond pricing review + term structure | `fixed_income.py` | 12 |
-| 12 | Jun 15–21 | Fixed Income — credit analysis (Merton), CDS | `fixed_income.py` | 12 |
-| 13 | Jun 22–28 | Derivatives — forwards/futures pricing, swap valuation | `derivatives.py` | 12 |
-| 14 | Jun 29 – Jul 5 | Derivatives — option strategies review | `derivatives.py` | 12 |
-| 15 | Jul 6–12 | Portfolio Mgmt — active management, Fama-French | `portfolio.py` | 12 |
-| 16 | Jul 13–19 | Alternatives — PE/VC, hedge fund strategies | `alternatives.py` | 12 |
-| 17 | Jul 20–26 | Alternatives — real assets, REIT valuation | `alternatives.py` | 12 |
-| 18 | Jul 27 – Aug 2 | Ethics — deep review of Standards + GIPS | `ethics.py` | 12 |
-
-### Phase 2 Milestone: Mock #2 (Aug 2)
-
-Full mock, timed. **Target: ≥ 60%.**  
-Carefully review every wrong answer — write down the rule, not just the answer.  
-Rank your bottom 3 topics by vignette score → these become Phase 3 priorities.
-
----
-
-## Phase 3 — Integration (Aug 3 – Sep 13 · 6 weeks · 13h/wk · 78h)
-
-**Goal:** No new material. Full mock every two weeks + targeted drilling of weak
-areas identified in Mocks #1 and #2.
+## Phase B — Mocks + Weak-Area Repair (Oct 26 – Nov 15 · 3 weeks · ~55h)
 
 | Week | Dates | Focus | Hours |
 |---|---|---|---|
-| 19 | Aug 3–9 | Weak area deep-dive #1 (from Mock #2 analysis) | 13 |
-| 20 | Aug 10–16 | **Mock #3** (full, timed) + review. Ethics always worth revisiting. | 13 |
-| 21 | Aug 17–23 | Weak area deep-dive #2 + FSA/Quant vignette drills | 13 |
-| 22 | Aug 24–30 | **Mock #4** (full, timed) + review | 13 |
-| 23 | Aug 31 – Sep 6 | Weak area deep-dive #3 + formula sheet construction | 13 |
-| 24 | Sep 7–13 | **Mock #5** (timed, strict exam conditions) + review | 13 |
+| 5 | Oct 26 – Nov 1 | Review Mock A in depth (4–5h; write down the rule behind each miss, not just the answer) · drill the 2 weakest topics · Ethics second pass · **Mock B Sat Oct 31** | 20 |
+| 6 | Nov 2–8 | Review Mock B · weakest topic + any high-weight topic below 60% · build a one-page formula sheet per topic · **Mock C Sat Nov 7** | 20 |
+| 7 | Nov 9–15 | Review Mock C · final Ethics pass (re-read Standards, then 40–60 Qs) · **Mock D Wed Nov 11 or Sat Nov 14** (official CFA Institute mock if saved) · review mistake log | 15 |
+| — | Nov 16–17 | Light only: formula sheets, mistake log, logistics. **No new material.** | 2–3 |
+| — | **Wed Nov 18** | **Exam** | |
 
-### Phase 3 Milestone: End of Week 24 (Sep 13)
-
-Mock scores should be trending toward **65–75%**.  
-Lock in your top 3 remaining weak sub-topics — these get extra attention in Phase 4.  
-Start building your personal formula sheet (one page per topic area).
-
----
-
-## Phase 4 — Final Push (Sep 14 – Nov 6 · 7 weeks · 14h/wk · 98h)
-
-**Goal:** Targeted review only. Two more full mocks. Exam week = rest + light review.
-
-| Week | Dates | Focus | Hours |
-|---|---|---|---|
-| 25 | Sep 14–20 | Ethics + Quant targeted vignettes (high return-per-hour) | 14 |
-| 26 | Sep 21–27 | Fixed Income + Derivatives targeted vignettes | 14 |
-| 27 | Sep 28 – Oct 4 | Equity (RI model) + FSA (intercorporate) — high-trap areas | 14 |
-| 28 | Oct 5–11 | **Mock #6** (full, timed, strict) + review | 14 |
-| 29 | Oct 12–18 | Portfolio + Alternatives targeted vignettes | 14 |
-| 30 | Oct 19–25 | **Mock #7** (final full mock) + comprehensive review | 14 |
-| 31 | Oct 26 – Nov 6 | Formula sheet review, light vignette warmup, **rest 2 days before exam** | 8 |
-
-### Phase 4 Milestone: Mock #7 (Oct 25)
-
-**Target: ≥ 70%.** If achieved → you are on track.  
-If below 65% → add 2–3h/day in the final week on your single weakest topic.
+If Mock C comes in under 60%, drop Mock D and spend those hours on your single
+weakest *high-weight* topic plus Ethics.
 
 ---
 
@@ -122,13 +86,11 @@ If below 65% → add 2–3h/day in the final week on your single weakest topic.
 
 | Mock | Date | Target | Action |
 |---|---|---|---|
-| Diagnostic #1 | May 24 | Baseline (ignore score) | Find structural weak areas |
-| Mock #2 | Aug 2 | ≥ 60% | Rank weak topics; pivot Phase 3 |
-| Mock #3 | Aug 16 | Trending up | Check improvement trajectory |
-| Mock #4 | Aug 30 | ≥ 65% | Formula sheet audit |
-| Mock #5 | Sep 13 | ≥ 65% | Lock in top-3 remaining weak spots |
-| Mock #6 | Oct 11 | ≥ 70% | Last strategy adjustment |
-| Mock #7 | Oct 25 | ≥ 70% | Final calibration; plan exam-day reading order |
+| Half baseline | Sep 28 | Ignore score | Set topic order within each week |
+| Mock A | Oct 25 | ≥ 55% | Pick 2 weak topics for Week 5 |
+| Mock B | Oct 31 | ≥ 62% | Check trend; adjust Week 6 |
+| Mock C | Nov 7 | ≥ 65% | Lock in the final weak topic |
+| Mock D | Nov 11–14 | ≥ 68–70% | Final calibration; exam-day pacing and reading order |
 
 ---
 
@@ -136,11 +98,10 @@ If below 65% → add 2–3h/day in the final week on your single weakest topic.
 
 | Phase | Weeks | h/wk | Total |
 |---|---|---|---|
-| Foundation | 8 | 10 | 80h |
-| Depth | 10 | 12 | 120h |
-| Integration | 6 | 13 | 78h |
-| Final Push | 7 | 14 | 98h |
-| **Total** | **31** | — | **376h** |
+| A — Fast learning pass | 4 | 20 | 80h |
+| B — Mocks + repair | 3 | 15–20 | 55h |
+| Final 2 days | — | — | ~3h |
+| **Total** | **7+** | — | **~138h** |
 
 ---
 
@@ -174,4 +135,4 @@ Run with: `uv run streamlit run app.py`
 
 ---
 
-*Generated: 2026-03-31*
+*Generated: 2026-03-31 · Revised: 2026-09-27*

@@ -61,4 +61,4 @@ Skill definitions live in `skills/cfa-explain/SKILL.md` and `skills/cfa-question
 
 ### Study plan
 
-`STUDY_PLAN.md` has the full 31-week schedule (Apr–Nov 2026) with mock exam dates and score targets. Each week maps to a specific `topics/*.py` module to use alongside reading.
+`STUDY_PLAN.md` has the revised schedule (Sep 28 – Nov 18, 2026 exam) with mock exam dates and score targets. Each week maps to a specific `topics/*.py` module to use alongside reading.
