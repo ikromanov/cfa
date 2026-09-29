@@ -1,6 +1,7 @@
 """Fixed Income — bond pricing, yield curves, duration & convexity, term structure, credit."""
 
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from scipy import stats
@@ -40,6 +41,129 @@ def convexity(face, coupon_rate, ytm, n_periods, freq=2):
     return (p_up + p_down - 2 * p) / (dp**2 * p)
 
 
+def option_smoothing_k(face, coupon_rate, n_periods, vol_scale, freq=2):
+    """Convert a yield-volatility slider into a soft-min/soft-max sharpness constant
+    `k`, scaled by the bond's price sensitivity at the coupon (the option's trigger).
+    Higher rate volatility → smaller k → a wider, smoother transition band, i.e. more
+    time value in the embedded option near the money."""
+    trigger      = coupon_rate
+    price_t      = bond_price(face, coupon_rate, trigger, n_periods, freq)
+    dur_t        = modified_duration(face, coupon_rate, trigger, n_periods, freq)
+    price_scale  = max(dur_t * price_t * vol_scale, 1.0)
+    return 1.0 / price_scale
+
+
+def callable_bond_price(face, coupon_rate, ytm, n_periods, call_price, k, freq=2):
+    """Callable bond price = smooth-min(straight price, call price) — approaches the
+    straight bond when out of the money, and is capped near the call price when the
+    issuer's call option is in the money (YTM well below the coupon). Guaranteed
+    non-increasing in yield, unlike a naive weighted blend of the two price levels."""
+    straight = bond_price(face, coupon_rate, ytm, n_periods, freq)
+    return -np.logaddexp(-k * straight, -k * call_price) / k
+
+
+def putable_bond_price(face, coupon_rate, ytm, n_periods, put_price, k, freq=2):
+    """Putable bond price = smooth-max(straight price, put price) — approaches the
+    straight bond when out of the money, and is floored near the put price when the
+    investor's put option is in the money (YTM well above the coupon)."""
+    straight = bond_price(face, coupon_rate, ytm, n_periods, freq)
+    return np.logaddexp(k * straight, k * put_price) / k
+
+
+def effective_duration_convexity(price_fn, ytm, dy=0.0025):
+    """Effective duration/convexity via finite differences on a full reprice —
+    required for embedded-option bonds since cash flows change with the yield level,
+    so closed-form modified duration/convexity (fixed cash flows) no longer applies."""
+    p0     = price_fn(ytm)
+    p_up   = price_fn(ytm + dy)
+    p_down = price_fn(ytm - dy)
+    eff_dur  = (p_down - p_up) / (2 * dy * p0)
+    eff_conv = (p_up + p_down - 2 * p0) / (dy**2 * p0)
+    return eff_dur, eff_conv
+
+
+# ── binomial interest-rate tree ─────────────────────────────────────────────
+
+def price_bond_on_tree(tree, coupon, face, maturity, call_price=None, put_price=None,
+                        spread=0.0, return_all=False):
+    """Backward induction through a calibrated binomial interest-rate tree.
+
+    `tree` is a list of length `maturity`; `tree[t]` holds the one-period rates
+    (length t+1, node index i = number of up-moves) that discount cash flows from
+    time t to t+1. `spread` (the OAS) is added to every node rate before discounting.
+    At each node the risk-neutral value is [0.5*(V_up + V_down) + coupon] / (1+r);
+    a callable bond's value is capped at `call_price`, a putable bond's floored at
+    `put_price` — the issuer/investor exercises whenever it is advantageous.
+    """
+    N = maturity
+    values = np.full(N + 1, face, dtype=float)
+    snapshots  = {N: values.copy()}
+    exercised  = {}
+    for t in range(N - 1, -1, -1):
+        rates_t = tree[t] + spread
+        new_values = np.empty(t + 1)
+        ex_flags   = np.zeros(t + 1, dtype=bool)
+        for i in range(t + 1):
+            held = (0.5 * (values[i + 1] + values[i]) + coupon) / (1 + rates_t[i])
+            pv = held
+            if call_price is not None and held > call_price:
+                pv = call_price
+                ex_flags[i] = True
+            if put_price is not None and held < put_price:
+                pv = put_price
+                ex_flags[i] = True
+            new_values[i] = pv
+        values = new_values
+        snapshots[t] = values.copy()
+        exercised[t] = ex_flags
+    if return_all:
+        return values[0], snapshots, exercised
+    return values[0]
+
+
+def calibrate_binomial_tree(par_rates, vol, iters=80):
+    """Calibrate a lognormal binomial interest-rate tree to a benchmark par curve.
+
+    For each maturity t+1, adjacent-node rates at step t are related by
+    r_{t,i} = r_{t,0} * exp(2*vol*i). `r_{t,0}` is found by bisection so that an
+    on-the-run par bond of that maturity, priced on the tree built so far, is worth
+    exactly par — the standard calibration used before valuing embedded-option bonds.
+    """
+    tree = []
+    for t, par_rate in enumerate(par_rates):
+        coupon = par_rate * 100.0
+
+        def price_at(r0, t=t, coupon=coupon):
+            rates_t = r0 * np.exp(2 * vol * np.arange(t + 1))
+            return price_bond_on_tree(tree + [rates_t], coupon, 100.0, t + 1)
+
+        lo, hi = 1e-6, 2.0
+        for _ in range(iters):
+            mid = (lo + hi) / 2
+            if price_at(mid) > 100.0:
+                lo = mid
+            else:
+                hi = mid
+        r0 = (lo + hi) / 2
+        tree.append(r0 * np.exp(2 * vol * np.arange(t + 1)))
+    return tree
+
+
+def solve_oas(tree, coupon, face, maturity, market_price, call_price=None, put_price=None,
+              iters=80):
+    """Bisection for the Option-Adjusted Spread: the constant spread added to every
+    node rate that makes the tree's model price equal the observed market price."""
+    lo, hi = -0.05, 0.15
+    for _ in range(iters):
+        mid = (lo + hi) / 2
+        p = price_bond_on_tree(tree, coupon, face, maturity, call_price, put_price, spread=mid)
+        if p > market_price:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
 # ── main render ───────────────────────────────────────────────────────────────
 
 def merton_default_prob(asset_value, debt_face, r, sigma_a, T):
@@ -57,15 +181,17 @@ def merton_default_prob(asset_value, debt_face, r, sigma_a, T):
 def render():
     st.title("Fixed Income")
 
-    tab_bond, tab_term, tab_credit, tab_cds = st.tabs([
+    tab_bond, tab_term, tab_credit, tab_cds, tab_embedded, tab_binom = st.tabs([
         "Bond Pricing & Duration",
         "Term Structure Theories",
         "Credit Analysis (Merton Model)",
         "Credit Default Swaps",
+        "Embedded Options & Spreads",
+        "Binomial Tree Pricing",
     ])
 
     with tab_bond:
-      st.markdown("""
+        st.markdown("""
 ## Bond Pricing
 
 A **bond** is a debt instrument promising periodic coupon payments and return of
@@ -97,130 +223,130 @@ $$\\Delta P \\approx \\left(-MD \\times \\Delta y + \\tfrac{1}{2} \\times Conv \
 > Zero-coupon bonds have duration equal to their maturity.
 """)
 
-    st.markdown("---")
-    st.markdown("## Interactive Charts")
+        st.markdown("---")
+        st.markdown("## Interactive Charts")
 
-    col1, col2 = st.columns([1, 2])
+        col1, col2 = st.columns([1, 2])
 
-    with col1:
-        face       = 1000.0
-        coupon_pct = st.slider("Coupon rate (%)", 0.0, 15.0, 6.0, 0.25)
-        maturity   = st.slider("Maturity (years)", 1, 30, 10)
-        ytm_pct    = st.slider("Current YTM (%)", 0.5, 20.0, 6.0, 0.25)
+        with col1:
+            face       = 1000.0
+            coupon_pct = st.slider("Coupon rate (%)", 0.0, 15.0, 6.0, 0.25)
+            maturity   = st.slider("Maturity (years)", 1, 30, 10)
+            ytm_pct    = st.slider("Current YTM (%)", 0.5, 20.0, 6.0, 0.25)
 
-        coupon = coupon_pct / 100
-        ytm    = ytm_pct    / 100
+            coupon = coupon_pct / 100
+            ytm    = ytm_pct    / 100
 
-        price = bond_price(face, coupon, ytm, maturity)
-        md    = modified_duration(face, coupon, ytm, maturity)
-        cvx   = convexity(face, coupon, ytm, maturity)
+            price = bond_price(face, coupon, ytm, maturity)
+            md    = modified_duration(face, coupon, ytm, maturity)
+            cvx   = convexity(face, coupon, ytm, maturity)
 
-        st.metric("Bond Price", f"${price:,.2f}")
-        st.metric("Modified Duration", f"{md:.3f} years")
-        st.metric("Convexity", f"{cvx:.2f}")
+            st.metric("Bond Price", f"${price:,.2f}")
+            st.metric("Modified Duration", f"{md:.3f} years")
+            st.metric("Convexity", f"{cvx:.2f}")
 
-        if price > face * 1.001:
-            st.info("Premium bond (coupon > YTM)")
-        elif price < face * 0.999:
-            st.info("Discount bond (coupon < YTM)")
-        else:
-            st.info("Par bond (coupon ≈ YTM)")
+            if price > face * 1.001:
+                st.info("Premium bond (coupon > YTM)")
+            elif price < face * 0.999:
+                st.info("Discount bond (coupon < YTM)")
+            else:
+                st.info("Par bond (coupon ≈ YTM)")
 
-    # ── Chart 1: Price vs YTM ──────────────────────────────────────────────
-    ytm_range = np.linspace(0.005, 0.20, 300)
-    prices    = [bond_price(face, coupon, y, maturity) for y in ytm_range]
+        # ── Chart 1: Price vs YTM ──────────────────────────────────────────────
+        ytm_range = np.linspace(0.005, 0.20, 300)
+        prices    = [bond_price(face, coupon, y, maturity) for y in ytm_range]
 
-    # Duration-only approximation
-    price_dur_approx = [
-        price * (1 - md * (y - ytm)) for y in ytm_range
-    ]
-    # Duration + convexity approximation
-    price_full_approx = [
-        price * (1 - md * (y - ytm) + 0.5 * cvx * (y - ytm)**2)
-        for y in ytm_range
-    ]
+        # Duration-only approximation
+        price_dur_approx = [
+            price * (1 - md * (y - ytm)) for y in ytm_range
+        ]
+        # Duration + convexity approximation
+        price_full_approx = [
+            price * (1 - md * (y - ytm) + 0.5 * cvx * (y - ytm)**2)
+            for y in ytm_range
+        ]
 
-    fig = make_subplots(
-        rows=1, cols=2,
-        subplot_titles=["Price vs YTM", "Yield Curve Shapes"],
-    )
+        fig = make_subplots(
+            rows=1, cols=2,
+            subplot_titles=["Price vs YTM", "Yield Curve Shapes"],
+        )
 
-    fig.add_trace(go.Scatter(
-        x=ytm_range * 100, y=prices,
-        name="Actual price", line=dict(color="royalblue", width=2.5),
-    ), row=1, col=1)
-    fig.add_trace(go.Scatter(
-        x=ytm_range * 100, y=price_dur_approx,
-        name="Duration approx.", line=dict(color="orange", width=1.5, dash="dash"),
-    ), row=1, col=1)
-    fig.add_trace(go.Scatter(
-        x=ytm_range * 100, y=price_full_approx,
-        name="Dur + Conv approx.", line=dict(color="green", width=1.5, dash="dot"),
-    ), row=1, col=1)
-
-    # Current YTM marker
-    fig.add_vline(x=ytm * 100, line_dash="dot", line_color="red",
-                  annotation_text=f"YTM={ytm_pct:.2f}%", row=1, col=1)
-    fig.add_hline(y=price, line_dash="dot", line_color="red", row=1, col=1)
-
-    # ── Chart 2: Yield curve shapes ────────────────────────────────────────
-    maturities = np.array([0.25, 0.5, 1, 2, 3, 5, 7, 10, 20, 30])
-
-    # Normal (upward sloping)
-    normal = 2.0 + 2.5 * (1 - np.exp(-maturities / 8))
-    # Inverted
-    inverted = 5.5 - 2.0 * (1 - np.exp(-maturities / 5))
-    # Flat
-    flat = np.full_like(maturities, 4.0)
-    # Humped
-    humped = 2.5 + 2.0 * maturities / 5 * np.exp(1 - maturities / 5)
-
-    for label, curve, color in [
-        ("Normal (upward)", normal, "royalblue"),
-        ("Inverted", inverted, "crimson"),
-        ("Flat", flat, "gray"),
-        ("Humped", humped, "darkorange"),
-    ]:
         fig.add_trace(go.Scatter(
-            x=maturities, y=curve,
-            name=label, mode="lines+markers",
-            line=dict(color=color, width=2),
-        ), row=1, col=2)
+            x=ytm_range * 100, y=prices,
+            name="Actual price", line=dict(color="royalblue", width=2.5),
+        ), row=1, col=1)
+        fig.add_trace(go.Scatter(
+            x=ytm_range * 100, y=price_dur_approx,
+            name="Duration approx.", line=dict(color="orange", width=1.5, dash="dash"),
+        ), row=1, col=1)
+        fig.add_trace(go.Scatter(
+            x=ytm_range * 100, y=price_full_approx,
+            name="Dur + Conv approx.", line=dict(color="green", width=1.5, dash="dot"),
+        ), row=1, col=1)
 
-    fig.update_xaxes(title_text="YTM (%)", row=1, col=1)
-    fig.update_yaxes(title_text="Price ($)", row=1, col=1)
-    fig.update_xaxes(title_text="Maturity (years)", row=1, col=2)
-    fig.update_yaxes(title_text="Yield (%)", row=1, col=2)
+        # Current YTM marker
+        fig.add_vline(x=ytm * 100, line_dash="dot", line_color="red",
+                      annotation_text=f"YTM={ytm_pct:.2f}%", row=1, col=1)
+        fig.add_hline(y=price, line_dash="dot", line_color="red", row=1, col=1)
 
-    fig.update_layout(height=520, hovermode="x unified")
+        # ── Chart 2: Yield curve shapes ────────────────────────────────────────
+        maturities = np.array([0.25, 0.5, 1, 2, 3, 5, 7, 10, 20, 30])
 
-    with col2:
-        st.plotly_chart(fig, use_container_width=True)
+        # Normal (upward sloping)
+        normal = 2.0 + 2.5 * (1 - np.exp(-maturities / 8))
+        # Inverted
+        inverted = 5.5 - 2.0 * (1 - np.exp(-maturities / 5))
+        # Flat
+        flat = np.full_like(maturities, 4.0)
+        # Humped
+        humped = 2.5 + 2.0 * maturities / 5 * np.exp(1 - maturities / 5)
 
-    # ── Duration by maturity heat ──────────────────────────────────────────
-    st.markdown("### Duration across coupon × maturity")
-    mats  = np.arange(1, 31)
-    cpns  = np.arange(1, 15) / 100
-    grid  = np.array([
-        [modified_duration(face, c, ytm, m) for m in mats]
-        for c in cpns
-    ])
+        for label, curve, color in [
+            ("Normal (upward)", normal, "royalblue"),
+            ("Inverted", inverted, "crimson"),
+            ("Flat", flat, "gray"),
+            ("Humped", humped, "darkorange"),
+        ]:
+            fig.add_trace(go.Scatter(
+                x=maturities, y=curve,
+                name=label, mode="lines+markers",
+                line=dict(color=color, width=2),
+            ), row=1, col=2)
 
-    fig2 = go.Figure(go.Heatmap(
-        z=grid,
-        x=mats,
-        y=[f"{c*100:.0f}%" for c in cpns],
-        colorscale="RdYlGn_r",
-        colorbar=dict(title="Mod. Duration (years)"),
-        hovertemplate="Maturity=%{x}yr  Coupon=%{y}  Duration=%{z:.2f}<extra></extra>",
-    ))
-    fig2.update_layout(
-        title=f"Modified Duration (YTM fixed at {ytm_pct:.2f}%)",
-        xaxis_title="Maturity (years)",
-        yaxis_title="Coupon rate",
-        height=380,
-    )
-    st.plotly_chart(fig2, use_container_width=True)
+        fig.update_xaxes(title_text="YTM (%)", row=1, col=1)
+        fig.update_yaxes(title_text="Price ($)", row=1, col=1)
+        fig.update_xaxes(title_text="Maturity (years)", row=1, col=2)
+        fig.update_yaxes(title_text="Yield (%)", row=1, col=2)
+
+        fig.update_layout(height=520, hovermode="x unified")
+
+        with col2:
+            st.plotly_chart(fig, use_container_width=True)
+
+        # ── Duration by maturity heat ──────────────────────────────────────────
+        st.markdown("### Duration across coupon × maturity")
+        mats  = np.arange(1, 31)
+        cpns  = np.arange(1, 15) / 100
+        grid  = np.array([
+            [modified_duration(face, c, ytm, m) for m in mats]
+            for c in cpns
+        ])
+
+        fig2 = go.Figure(go.Heatmap(
+            z=grid,
+            x=mats,
+            y=[f"{c*100:.0f}%" for c in cpns],
+            colorscale="RdYlGn_r",
+            colorbar=dict(title="Mod. Duration (years)"),
+            hovertemplate="Maturity=%{x}yr  Coupon=%{y}  Duration=%{z:.2f}<extra></extra>",
+        ))
+        fig2.update_layout(
+            title=f"Modified Duration (YTM fixed at {ytm_pct:.2f}%)",
+            xaxis_title="Maturity (years)",
+            yaxis_title="Coupon rate",
+            height=380,
+        )
+        st.plotly_chart(fig2, use_container_width=True)
 
     # ══════════════════════════════════════════════════════════════════════
     with tab_term:
@@ -524,3 +650,456 @@ Where **recovery rate** is the fraction of face value recovered in bankruptcy (t
                       delta="Negative basis (arb opportunity)" if basis < 0 else "Positive basis",
                       delta_color="normal" if basis < 0 else "off")
             st.plotly_chart(fig_cds, use_container_width=True)
+
+    # ══════════════════════════════════════════════════════════════════════
+    with tab_embedded:
+        st.markdown("""
+## Bonds with Embedded Options
+
+Many corporate bonds give one side the right to alter the bond's cash flows before
+maturity. The two classic structures:
+
+| | Option owner | Exercised when... | Effect on investor |
+|---|---|---|---|
+| **Callable bond** | Issuer (investor is short a call) | Rates **fall** — issuer refinances cheaper | Price upside is **capped** near the call price |
+| **Putable bond** | Investor (investor is long a put) | Rates **rise** — investor "sells back" near par | Price downside is **floored** near the put price |
+
+### Valuation
+
+$$V_{\\text{callable}} = V_{\\text{straight}} - V_{\\text{call option}}$$
+$$V_{\\text{putable}} = V_{\\text{straight}} + V_{\\text{put option}}$$
+
+### Moneyness
+
+- **Out of the money (OTM):** current YTM is far from the coupon/trigger — the option
+  is nearly worthless and the bond behaves like an option-free (straight) bond.
+- **At/near the money:** the option's value is most sensitive to yield changes — this
+  is where **negative convexity** (callable) or the sharpest **positive convexity**
+  (putable) appears.
+- **In the money (ITM):** the option dominates pricing. A callable bond compresses
+  toward the **call price** (upside capped — "**price compression**" / negative
+  convexity). A putable bond is supported at the **put price** (a price floor).
+
+### Why *effective*, not modified, duration/convexity
+
+A callable/putable bond's cash flows depend on whether the option gets exercised, so
+the closed-form modified-duration formulas (which assume fixed cash flows) break
+down. Instead, reprice the bond after shocking yields up and down:
+
+$$ED = \\frac{P_{-\\Delta y} - P_{+\\Delta y}}{2 \\times \\Delta y \\times P_0}, \\qquad
+EC = \\frac{P_{+\\Delta y} + P_{-\\Delta y} - 2P_0}{(\\Delta y)^2 \\times P_0}$$
+
+Deep ITM, a callable bond's price barely moves as yields fall further (it's pinned
+near the call price) — **effective duration shrinks toward zero** and **effective
+convexity turns negative**. A putable bond, by contrast, keeps **positive convexity**
+across the board because the put floor only ever helps the investor.
+
+### Option-Adjusted Spread (OAS)
+
+$$OAS = Z\\text{-spread} - \\text{Option Cost}$$
+
+- Callable bond: option cost > 0 → **OAS < Z-spread**
+- Putable bond: option cost < 0 → **OAS > Z-spread**
+
+OAS strips the option's value out of the spread so callable, putable, and
+option-free bonds can be compared on a like-for-like credit basis.
+
+> **Exam tip:** Higher assumed interest-rate **volatility** raises the value of *any*
+> embedded option (call or put), since it raises the odds the option ends up in the
+> money. Higher volatility → **lower** callable bond price, **higher** putable bond
+> price — even if the *level* of rates doesn't change.
+""")
+
+        st.markdown("---")
+        st.markdown("## Interactive: Callable vs. Putable vs. Straight Bond")
+
+        col1, col2 = st.columns([1, 2])
+
+        with col1:
+            face_e      = 1000.0
+            coupon_e_pct = st.slider("Coupon rate (%)", 1.0, 12.0, 6.0, 0.25, key="emb_coupon")
+            maturity_e   = st.slider("Maturity (years)", 2, 30, 10, key="emb_mat")
+            ytm_e_pct    = st.slider("Current YTM (%)", 0.5, 15.0, 6.0, 0.25, key="emb_ytm")
+            call_px_pct  = st.slider("Call price (% of par)", 100.0, 110.0, 102.0, 0.5, key="emb_call")
+            put_px_pct   = st.slider("Put price (% of par)", 90.0, 105.0, 100.0, 0.5, key="emb_put")
+            vol_pct      = st.slider("Rate volatility / option time-value (%)", 0.2, 3.0, 1.0, 0.1,
+                                      key="emb_vol",
+                                      help="Wider = more time value in the option, e.g. higher assumed rate volatility")
+
+            coupon_e = coupon_e_pct / 100
+            ytm_e    = ytm_e_pct / 100
+            vol_e    = vol_pct / 100
+            call_px  = face_e * call_px_pct / 100
+            put_px   = face_e * put_px_pct / 100
+            k_e      = option_smoothing_k(face_e, coupon_e, maturity_e, vol_e)
+
+            straight_price = bond_price(face_e, coupon_e, ytm_e, maturity_e)
+            call_price_now = callable_bond_price(face_e, coupon_e, ytm_e, maturity_e, call_px, k_e)
+            put_price_now  = putable_bond_price(face_e, coupon_e, ytm_e, maturity_e, put_px, k_e)
+
+            st.metric("Straight (option-free) price", f"${straight_price:,.2f}")
+            st.metric("Callable bond price", f"${call_price_now:,.2f}",
+                      delta=f"{call_price_now - straight_price:,.2f} (call option value)")
+            st.metric("Putable bond price", f"${put_price_now:,.2f}",
+                      delta=f"{put_price_now - straight_price:,.2f} (put option value)")
+
+            gap_pct = (ytm_e - coupon_e) * 100
+            if gap_pct < -0.5:
+                st.warning("Callable bond: **IN THE MONEY** — YTM well below coupon, issuer likely to refinance/call.")
+            elif gap_pct > 0.5:
+                st.success("Callable bond: **OUT OF THE MONEY** — behaves like a straight bond.")
+            else:
+                st.info("Callable bond: **NEAR THE MONEY** — sharpest negative convexity here.")
+
+            if gap_pct > 0.5:
+                st.warning("Putable bond: **IN THE MONEY** — YTM well above coupon, investor likely to put.")
+            elif gap_pct < -0.5:
+                st.success("Putable bond: **OUT OF THE MONEY** — behaves like a straight bond.")
+            else:
+                st.info("Putable bond: **NEAR THE MONEY** — sharpest positive convexity here.")
+
+        # ── Chart: Price vs YTM for straight / callable / putable ──────────
+        ytm_range_e = np.linspace(0.005, 0.20, 300)
+        straight_curve = [bond_price(face_e, coupon_e, y, maturity_e) for y in ytm_range_e]
+        callable_curve = [callable_bond_price(face_e, coupon_e, y, maturity_e, call_px, k_e) for y in ytm_range_e]
+        putable_curve  = [putable_bond_price(face_e, coupon_e, y, maturity_e, put_px, k_e) for y in ytm_range_e]
+
+        fig_e = go.Figure()
+        fig_e.add_trace(go.Scatter(
+            x=ytm_range_e * 100, y=straight_curve,
+            name="Straight bond", line=dict(color="gray", width=2, dash="dot"),
+        ))
+        fig_e.add_trace(go.Scatter(
+            x=ytm_range_e * 100, y=callable_curve,
+            name="Callable bond", line=dict(color="crimson", width=2.5),
+        ))
+        fig_e.add_trace(go.Scatter(
+            x=ytm_range_e * 100, y=putable_curve,
+            name="Putable bond", line=dict(color="mediumseagreen", width=2.5),
+        ))
+        fig_e.add_hline(y=call_px, line_dash="dash", line_color="crimson",
+                        annotation_text=f"Call price ${call_px:,.0f}", annotation_position="bottom right")
+        fig_e.add_hline(y=put_px, line_dash="dash", line_color="mediumseagreen",
+                        annotation_text=f"Put price ${put_px:,.0f}", annotation_position="top right")
+        fig_e.add_vline(x=coupon_e_pct, line_dash="dot", line_color="black",
+                        annotation_text=f"Coupon={coupon_e_pct:.2f}% (trigger)")
+        fig_e.add_vline(x=ytm_e_pct, line_dash="dot", line_color="steelblue",
+                        annotation_text=f"Current YTM={ytm_e_pct:.2f}%")
+
+        fig_e.update_layout(
+            title="Price–Yield Profiles: Negative vs. Positive Convexity",
+            xaxis_title="YTM (%)", yaxis_title="Price ($)",
+            height=520, hovermode="x unified",
+            legend=dict(orientation="h", yanchor="bottom", y=-0.25),
+        )
+
+        with col2:
+            st.plotly_chart(fig_e, use_container_width=True)
+
+        # ── Effective duration/convexity comparison ─────────────────────────
+        st.markdown("### Effective Duration & Convexity — Straight vs. Callable vs. Putable")
+
+        ed_straight, ec_straight = effective_duration_convexity(
+            lambda y: bond_price(face_e, coupon_e, y, maturity_e), ytm_e)
+        ed_call, ec_call = effective_duration_convexity(
+            lambda y: callable_bond_price(face_e, coupon_e, y, maturity_e, call_px, k_e), ytm_e)
+        ed_put, ec_put = effective_duration_convexity(
+            lambda y: putable_bond_price(face_e, coupon_e, y, maturity_e, put_px, k_e), ytm_e)
+
+        d1, d2, d3 = st.columns(3)
+        d1.metric("Straight — Eff. Duration", f"{ed_straight:.2f}")
+        d1.metric("Straight — Eff. Convexity", f"{ec_straight:.1f}")
+        d2.metric("Callable — Eff. Duration", f"{ed_call:.2f}",
+                  delta=f"{ed_call - ed_straight:+.2f} vs straight")
+        d2.metric("Callable — Eff. Convexity", f"{ec_call:.1f}",
+                  delta="Negative convexity" if ec_call < 0 else "Positive",
+                  delta_color="inverse" if ec_call < 0 else "normal")
+        d3.metric("Putable — Eff. Duration", f"{ed_put:.2f}",
+                  delta=f"{ed_put - ed_straight:+.2f} vs straight")
+        d3.metric("Putable — Eff. Convexity", f"{ec_put:.1f}",
+                  delta="Positive convexity", delta_color="normal")
+
+        # ── Effective duration across the yield range ────────────────────────
+        ed_range_call = [effective_duration_convexity(
+            lambda yy: callable_bond_price(face_e, coupon_e, yy, maturity_e, call_px, k_e), y)[0]
+            for y in ytm_range_e]
+        ed_range_put = [effective_duration_convexity(
+            lambda yy: putable_bond_price(face_e, coupon_e, yy, maturity_e, put_px, k_e), y)[0]
+            for y in ytm_range_e]
+        ed_range_straight = [effective_duration_convexity(
+            lambda yy: bond_price(face_e, coupon_e, yy, maturity_e), y)[0]
+            for y in ytm_range_e]
+
+        fig_ed = go.Figure()
+        fig_ed.add_trace(go.Scatter(x=ytm_range_e * 100, y=ed_range_straight,
+                                     name="Straight", line=dict(color="gray", width=2, dash="dot")))
+        fig_ed.add_trace(go.Scatter(x=ytm_range_e * 100, y=ed_range_call,
+                                     name="Callable", line=dict(color="crimson", width=2.5)))
+        fig_ed.add_trace(go.Scatter(x=ytm_range_e * 100, y=ed_range_put,
+                                     name="Putable", line=dict(color="mediumseagreen", width=2.5)))
+        fig_ed.add_hline(y=0, line_color="black", line_width=1)
+        fig_ed.add_vline(x=coupon_e_pct, line_dash="dot", line_color="black")
+        fig_ed.update_layout(
+            title="Effective Duration collapses (callable) or stays elevated (putable) near the money",
+            xaxis_title="YTM (%)", yaxis_title="Effective Duration (years)",
+            height=380,
+        )
+        st.plotly_chart(fig_ed, use_container_width=True)
+
+    # ══════════════════════════════════════════════════════════════════════
+    with tab_binom:
+        st.markdown(r"""
+## Binomial Interest Rate Tree Pricing
+
+The price-yield curves in the previous tab used a smooth shortcut. In practice
+(and on the exam), callable/putable bonds are valued on a **binomial interest
+rate tree**: a lattice of possible future short rates, discounted back to today
+one period at a time, applying the call/put decision at every node along the way.
+
+### 1. Build the tree
+
+At each time step $t$, there are $t+1$ possible one-period rates, indexed by the
+number of "up" moves $i = 0, \dots, t$. Adjacent nodes are related by a constant
+multiplicative spread driven by assumed interest-rate **volatility** $\sigma$:
+
+$$r_{t,i} = r_{t,0} \times e^{2\sigma i}$$
+
+so $r_{t,0}$ (the bottom node) pins down the whole time-step. Up and down moves
+are **equally likely (50/50) under the risk-neutral measure** — all the real-world
+probability information is already embedded in the rate levels themselves.
+
+### 2. Calibrate to the benchmark yield curve
+
+$r_{t,0}$ is *not* free — it is found by **bisection** so that an on-the-run par
+bond of maturity $t+1$, priced on the tree built so far, comes out to exactly par
+(100). This repeats one maturity at a time, so the tree exactly reproduces the
+benchmark par curve when it is used to price option-free bonds.
+
+### 3. Value the bond by backward induction
+
+Starting at maturity (where every node is worth the redemption value) and working
+backward to today, each node's value is the probability-weighted average of its
+two successors, discounted one period, plus the coupon received at that node:
+
+$$V_{t,i} = \frac{0.5\,(V_{t+1,i+1} + V_{t+1,i}) + CF_{t+1}}{1 + r_{t,i}}$$
+
+**Embedded option logic** — compare the "held" value above to the exercise price
+at every node *before* discounting further back:
+
+$$V_{t,i}^{\text{callable}} = \min\!\big(V_{t,i}, \text{Call Price}\big), \qquad
+V_{t,i}^{\text{putable}} = \max\!\big(V_{t,i}, \text{Put Price}\big)$$
+
+The root node's value, $V_{0,0}$, is today's price.
+
+### 4. Option-Adjusted Spread (OAS)
+
+If the model price doesn't match the bond's observed market price, add a constant
+spread to **every node rate** and re-run backward induction until it does — that
+spread is the OAS, the bond's compensation for credit/liquidity risk *after*
+stripping out the value of the embedded option.
+
+> **Exam tip:** Higher volatility widens the spread between up/down nodes, which
+> raises the value of *any* embedded option — lowering a callable bond's price and
+> raising a putable bond's price, exactly as in the smooth-model chart above.
+""")
+
+        st.markdown("---")
+        st.markdown("## Worked Example — Step by Step")
+
+        col1, col2 = st.columns([1, 2])
+
+        with col1:
+            n_periods = st.select_slider("Number of periods (years)", options=[2, 3, 4], value=3,
+                                          key="binom_n")
+            st.caption("Benchmark par curve (annual-pay, par = 100)")
+            par_rates = []
+            for yr in range(1, n_periods + 1):
+                default = 3.0 + 0.5 * yr
+                pr = st.slider(f"{yr}-yr par rate (%)", 1.0, 10.0, default, 0.1, key=f"binom_par_{yr}")
+                par_rates.append(pr / 100)
+
+            vol_binom = st.slider("Interest rate volatility σ (%)", 5.0, 30.0, 15.0, 1.0, key="binom_vol") / 100
+            coupon_binom_pct = st.slider("Bond coupon rate (%)", 1.0, 10.0, 5.0, 0.25, key="binom_coupon")
+            coupon_binom = coupon_binom_pct  # dollars per $100 face, annual
+
+            is_callable = st.checkbox("Callable", value=True, key="binom_callable")
+            call_px_binom = st.slider("Call price", 95.0, 110.0, 100.0, 0.5, key="binom_callpx",
+                                       disabled=not is_callable)
+            is_putable = st.checkbox("Putable", value=False, key="binom_putable")
+            put_px_binom = st.slider("Put price", 90.0, 105.0, 100.0, 0.5, key="binom_putpx",
+                                      disabled=not is_putable)
+
+        tree = calibrate_binomial_tree(par_rates, vol_binom)
+
+        call_arg = call_px_binom if is_callable else None
+        put_arg  = put_px_binom if is_putable else None
+
+        straight_price, straight_snap, _ = price_bond_on_tree(
+            tree, coupon_binom, 100.0, n_periods, return_all=True)
+        callable_price, callable_snap, callable_ex = price_bond_on_tree(
+            tree, coupon_binom, 100.0, n_periods, call_price=call_arg, return_all=True)
+        putable_price, putable_snap, putable_ex = price_bond_on_tree(
+            tree, coupon_binom, 100.0, n_periods, put_price=put_arg, return_all=True)
+
+        # ── Step 1: calibrated tree ────────────────────────────────────────
+        st.markdown(f"### Step 1 — Calibrated {n_periods}-period rate tree")
+        st.caption("Each column t holds the one-period rates available from time t to t+1, "
+                   "calibrated so a par bond of that maturity prices to exactly 100.")
+
+        tree_rows = []
+        for i in range(n_periods - 1, -1, -1):
+            row = {"node": f"i={i}"}
+            for t in range(n_periods):
+                row[f"t={t}"] = f"{tree[t][i]*100:.3f}%" if i <= t else ""
+            tree_rows.append(row)
+        tree_df = pd.DataFrame(tree_rows).set_index("node")
+        st.dataframe(tree_df, use_container_width=True)
+
+        # Tree diagram
+        edge_x, edge_y = [], []
+        node_x, node_y, node_text = [], [], []
+        for t in range(n_periods):
+            for i in range(t + 1):
+                y = i - t / 2
+                node_x.append(t); node_y.append(y)
+                node_text.append(f"{tree[t][i]*100:.2f}%")
+                edge_x += [t, t + 1, None]; edge_y += [y, i - (t + 1) / 2, None]
+                edge_x += [t, t + 1, None]; edge_y += [y, i + 1 - (t + 1) / 2, None]
+        for i in range(n_periods + 1):
+            y = i - n_periods / 2
+            node_x.append(n_periods); node_y.append(y)
+            node_text.append("Maturity")
+
+        fig_tree = go.Figure()
+        fig_tree.add_trace(go.Scatter(x=edge_x, y=edge_y, mode="lines",
+                                       line=dict(color="lightgray", width=1), hoverinfo="skip",
+                                       showlegend=False))
+        fig_tree.add_trace(go.Scatter(x=node_x, y=node_y, mode="markers+text",
+                                       marker=dict(size=26, color="steelblue"),
+                                       text=node_text, textposition="middle center",
+                                       textfont=dict(size=9, color="white"), showlegend=False))
+        fig_tree.update_layout(
+            title="Binomial Rate Lattice (up move → higher node)",
+            xaxis_title="Time step t", yaxis=dict(visible=False),
+            height=380, margin=dict(l=20, r=20, t=40, b=20),
+        )
+        with col2:
+            st.plotly_chart(fig_tree, use_container_width=True)
+
+        # ── Step 2: worked backward-induction arithmetic ─────────────────────
+        st.markdown("### Step 2 — Backward induction, one step at a time")
+
+        r_top = tree[n_periods - 1][n_periods - 1]
+        v_top = (100.0 + coupon_binom) / (1 + r_top)
+        r_bot = tree[n_periods - 1][0]
+        v_bot = (100.0 + coupon_binom) / (1 + r_bot)
+
+        st.markdown(f"""
+**From maturity back to $t={n_periods-1}$:** every node at maturity is worth the
+redemption value (\\${100:.2f}), so at each $t={n_periods-1}$ node both successors
+equal \\$100.00.
+
+- Top node ($i={n_periods-1}$, rate $r={r_top*100:.3f}\\%$):
+$$V = \\frac{{0.5\\times(100.00+100.00) + {coupon_binom:.2f}}}{{1+{r_top:.5f}}} = \\${v_top:.3f}$$
+
+- Bottom node ($i=0$, rate $r={r_bot*100:.3f}\\%$):
+$$V = \\frac{{0.5\\times(100.00+100.00) + {coupon_binom:.2f}}}{{1+{r_bot:.5f}}} = \\${v_bot:.3f}$$
+
+This repeats at every node, one time step at a time, using the **two already-computed
+successor values** — never re-touching maturity — until it reaches $t=0$.
+""")
+
+        if is_callable:
+            found = None
+            for t in range(n_periods - 1, -1, -1):
+                idx = np.where(callable_ex[t])[0]
+                if len(idx):
+                    i = idx[0]
+                    held = (0.5 * (callable_snap[t + 1][i + 1] + callable_snap[t + 1][i])
+                            + coupon_binom) / (1 + tree[t][i])
+                    found = (t, i, held)
+                    break
+            if found:
+                t, i, held = found
+                st.markdown(f"""
+**Where the call kicks in:** at node $t={t}, i={i}$ the held (unconstrained) value is
+\\${held:.3f}, above the call price of \\${call_px_binom:.2f} — the issuer calls the
+bond, so $V_{{{t},{i}}}$ is capped at \\${call_px_binom:.2f} (marked **\\*** below)
+instead of the higher uncapped value.
+""")
+            else:
+                st.caption("With these inputs, the call price is never reached — the callable "
+                           "bond prices identically to the straight bond.")
+
+        if is_putable:
+            found = None
+            for t in range(n_periods - 1, -1, -1):
+                idx = np.where(putable_ex[t])[0]
+                if len(idx):
+                    i = idx[0]
+                    held = (0.5 * (putable_snap[t + 1][i + 1] + putable_snap[t + 1][i])
+                            + coupon_binom) / (1 + tree[t][i])
+                    found = (t, i, held)
+                    break
+            if found:
+                t, i, held = found
+                st.markdown(f"""
+**Where the put kicks in:** at node $t={t}, i={i}$ the held (unconstrained) value is
+\\${held:.3f}, below the put price of \\${put_px_binom:.2f} — the investor puts the
+bond back, so $V_{{{t},{i}}}$ is floored at \\${put_px_binom:.2f} (marked **\\*** below).
+""")
+            else:
+                st.caption("With these inputs, the put price is never reached — the putable "
+                           "bond prices identically to the straight bond.")
+
+        # ── Step 3: full backward-induction tables ───────────────────────────
+        st.markdown("### Step 3 — Full backward induction")
+
+        def snapshot_df(snapshots, exercised=None):
+            rows = []
+            for i in range(n_periods, -1, -1):
+                row = {"node": f"i={i}"}
+                for t in range(n_periods, -1, -1):
+                    if i <= t:
+                        cell = f"{snapshots[t][i]:.3f}"
+                        if exercised is not None and t in exercised and i < len(exercised[t]) and exercised[t][i]:
+                            cell += " *"
+                        row[f"t={t}"] = cell
+                    else:
+                        row[f"t={t}"] = ""
+                rows.append(row)
+            cols = ["node"] + [f"t={t}" for t in range(n_periods + 1)]
+            return pd.DataFrame(rows)[cols].set_index("node")
+
+        st.markdown("**Straight (option-free) bond**")
+        st.dataframe(snapshot_df(straight_snap), use_container_width=True)
+
+        if is_callable:
+            st.markdown("**Callable bond** (\\* = called at this node)")
+            st.dataframe(snapshot_df(callable_snap, callable_ex), use_container_width=True)
+
+        if is_putable:
+            st.markdown("**Putable bond** (\\* = put back at this node)")
+            st.dataframe(snapshot_df(putable_snap, putable_ex), use_container_width=True)
+
+        # ── Step 4: results ───────────────────────────────────────────────
+        st.markdown("### Step 4 — Results")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Straight bond price", f"${straight_price:.3f}")
+        if is_callable:
+            m2.metric("Callable bond price", f"${callable_price:.3f}",
+                      delta=f"{callable_price - straight_price:+.3f} (call option value)")
+        if is_putable:
+            m3.metric("Putable bond price", f"${putable_price:.3f}",
+                      delta=f"{putable_price - straight_price:+.3f} (put option value)")
+
+        # ── Bonus: OAS solver ───────────────────────────────────────────────
+        with st.expander("Bonus — solve for the Option-Adjusted Spread (OAS)"):
+            st.markdown("Enter this bond's observed market price to back out its OAS: the "
+                        "constant spread added to every tree node that reprices it exactly.")
+            model_price = callable_price if is_callable else (putable_price if is_putable else straight_price)
+            market_price = st.number_input("Observed market price ($)", value=round(model_price, 3),
+                                           step=0.1, key="binom_market_price")
+            oas = solve_oas(tree, coupon_binom, 100.0, n_periods, market_price,
+                            call_price=call_arg, put_price=put_arg)
+            st.metric("Option-Adjusted Spread (OAS)", f"{oas*10000:.1f} bps")
