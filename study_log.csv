@@ -1,2 +1,6 @@
-datetime,topics,duration_h,notes
-2026-09-27 14:24,Ethics - Module 1,0.5,19/27 - read questions carefully
+timestamp,topic,hours,questions,correct,comments
+2026-09-27 14:24,Ethics - Module 1,0.5,27,19,read questions carefully
+2026-09-27 19:42,FSA - Module 1: Intercorporate Investments,0.5,16,10,Need to review accounting methods for different acquisition methods
+2026-09-28 15:24,FSA - Module 2: Employee Compensation,0.42,25,10,Review accounting
+2026-09-28 17:12,FSA - Module 5: Quality of Financial reports,0.55,26,13,TODO: practice more
+2026-09-28 22:33,FSA - Module 3: Multinational Operations,0.5,9,4,Need to review examples in the readings
