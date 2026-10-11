@@ -18,7 +18,7 @@ st.set_page_config(
 
 from topics import (
     ethics, quant, economics, fsa, corporate,
-    equity, fixed_income, derivatives, alternatives,
+    equity, fixed_income, embedded_options, derivatives, alternatives,
     portfolio, risk_management, study_report,
 )
 
@@ -29,6 +29,7 @@ HIGH_WEIGHT = {
     "Financial Statement Analysis":     fsa,
     "Equity Valuation":                 equity,
     "Fixed Income":                     fixed_income,
+    "↳ Bonds with Embedded Options":    embedded_options,
     "Portfolio Management":             portfolio,
 }
 MID_WEIGHT = {

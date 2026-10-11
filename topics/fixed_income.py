@@ -85,7 +85,7 @@ def effective_duration_convexity(price_fn, ytm, dy=0.0025):
 # ── binomial interest-rate tree ─────────────────────────────────────────────
 
 def price_bond_on_tree(tree, coupon, face, maturity, call_price=None, put_price=None,
-                        spread=0.0, return_all=False):
+                        spread=0.0, return_all=False, first_exercise=0):
     """Backward induction through a calibrated binomial interest-rate tree.
 
     `tree` is a list of length `maturity`; `tree[t]` holds the one-period rates
@@ -93,7 +93,8 @@ def price_bond_on_tree(tree, coupon, face, maturity, call_price=None, put_price=
     time t to t+1. `spread` (the OAS) is added to every node rate before discounting.
     At each node the risk-neutral value is [0.5*(V_up + V_down) + coupon] / (1+r);
     a callable bond's value is capped at `call_price`, a putable bond's floored at
-    `put_price` — the issuer/investor exercises whenever it is advantageous.
+    `put_price` — the issuer/investor exercises whenever it is advantageous, at any
+    node from time `first_exercise` onward (earlier nodes are a lockout period).
     """
     N = maturity
     values = np.full(N + 1, face, dtype=float)
@@ -106,10 +107,12 @@ def price_bond_on_tree(tree, coupon, face, maturity, call_price=None, put_price=
         for i in range(t + 1):
             held = (0.5 * (values[i + 1] + values[i]) + coupon) / (1 + rates_t[i])
             pv = held
-            if call_price is not None and held > call_price:
+            if t < first_exercise:
+                pass
+            elif call_price is not None and held > call_price:
                 pv = call_price
                 ex_flags[i] = True
-            if put_price is not None and held < put_price:
+            elif put_price is not None and held < put_price:
                 pv = put_price
                 ex_flags[i] = True
             new_values[i] = pv
