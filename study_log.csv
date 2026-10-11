@@ -13,3 +13,7 @@ timestamp,topic,hours,questions,correct,comments
 2026-10-01 19:06,Equity Valuation - Module 5: Residual Income Valuation,0.33,16,10,Practice a bit more
 2026-10-01 19:21,Equity Valuation - Module 6: Private Company Valuation,0.33,15,5,Review valuation methods for private companies
 2026-10-05 14:35,Fixed Income - Module 2: The Arbitrage-Free Valuation Framework,0.75,19,12,Review binomial trees construction and specific interest rate models
+2026-10-08 21:58,Fixed Income - Module 3: Valuation and Analysis of Bonds with Embedded Options,0.75,27,10,Review definitions of effective duration and pricing of bonds with options in general
+2026-10-10 23:01,Portfolio Management - Module 1: Economics and Investment Markets,0.33,16,8,Review summary
+2026-10-10 23:02,Portfolio Management - Module 2: Analysis of Active Portfolio Management,0.33,14,7,Review Information Ratio definition and properties
+2026-10-10 23:16,Portfolio Management - Module 3: Exchange-Traded Funds: Mechanics and Applications,0.33,23,14,Read summary
