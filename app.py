@@ -54,7 +54,6 @@ with st.sidebar:
     st.caption("Study Guide · Nov 2026 Exam")
     st.markdown("---")
 
-    st.markdown("**Core topics (10–15% each)**")
     choice = st.radio(
         "nav", list(ALL_TOPICS.keys()),
         label_visibility="collapsed",
@@ -63,16 +62,23 @@ with st.sidebar:
 
 if choice == "🏠 Home":
     st.title("CFA Level II Study Guide")
+
+    days_left = (EXAM_DATE - date.today()).days
+    col1, col2, col3 = st.columns(3)
+    col1.info(f"**Exam date:** {EXAM_DATE:%B %-d, %Y}")
+    col2.info("**Recommended hours:** 300–350")
+    col3.info("**Format:** 2 × 44-question vignette sessions")
+
+    if days_left > 0:
+        st.metric("Days until exam", days_left)
+    elif days_left == 0:
+        st.metric("Exam day", "Today")
+    else:
+        st.metric("Exam", "Completed")
+
     st.markdown("""
 Welcome to your interactive CFA Level II prep portal. Every topic below includes
 theory with Level II exam tips, interactive charts, and formula references.
-
-### How to use this app
-
-1. Select a topic in the sidebar
-2. Read the theory overview — pay attention to the **Exam tip** callouts
-3. Use the sliders to build intuition by seeing how parameters change the charts
-4. Cross-reference your formula sheet with the equations shown
 
 > **Level II vs Level I:** The exam tests *application and analysis*, not just recall.
 > Every question is a vignette (mini case study) with 6 questions. Practice linking
@@ -95,19 +101,6 @@ theory with Level II exam tips, interactive charts, and formula references.
 | Alternative Investments | 5–10% |
 | Risk Management | — |
 """)
-
-    days_left = (EXAM_DATE - date.today()).days
-    col1, col2, col3 = st.columns(3)
-    col1.info(f"**Exam date:** {EXAM_DATE:%B %-d, %Y}")
-    col2.info("**Recommended hours:** 300–350")
-    col3.info("**Format:** 2 × 44-question vignette sessions")
-
-    if days_left > 0:
-        st.metric("Days until exam", days_left)
-    elif days_left == 0:
-        st.metric("Exam day", "Today")
-    else:
-        st.metric("Exam", "Completed")
 
 else:
     module = ALL_TOPICS[choice]
